@@ -6,62 +6,95 @@ import './App.css';
 const API_BASE = 'http://localhost:5000/api';
 
 function App() {
-  const [environments, setEnvironments] = useState([]);
-  const [selectedEnv, setSelectedEnv] = useState(null);
-  const [loading, setLoading] = useState(false);
+  const [currentEnvironment, setCurrentEnvironment] = useState(null);
+  const [selectedEnvironment, setSelectedEnvironment] = useState(null);
+  const [isCreating, setIsCreating] = useState(false);
   const [nodeCount, setNodeCount] = useState(1);
 
   useEffect(() => {
     fetchEnvironments();
-    const interval = setInterval(fetchEnvironments, 2000);
-    return () => clearInterval(interval);
   }, []);
 
   const fetchEnvironments = async () => {
     try {
       const response = await axios.get(`${API_BASE}/environments`);
-      setEnvironments(response.data);
+      const environments = response.data;
+      
+      if (environments.length > 0) {
+        setCurrentEnvironment(environments[0]);
+        // If we had a selected environment and it still exists, keep it selected
+        if (selectedEnvironment && environments.find(env => env.id === selectedEnvironment.id)) {
+          const updatedEnv = environments.find(env => env.id === selectedEnvironment.id);
+          setSelectedEnvironment(updatedEnv);
+        }
+      } else {
+        setCurrentEnvironment(null);
+        setSelectedEnvironment(null);
+      }
     } catch (error) {
       console.error('Error fetching environments:', error);
     }
   };
 
   const createEnvironment = async () => {
-    setLoading(true);
+    if (currentEnvironment) {
+      alert('Please delete the existing environment before creating a new one.');
+      return;
+    }
+
+    setIsCreating(true);
     try {
       const response = await axios.post(`${API_BASE}/environments`, {
         nodeCount: parseInt(nodeCount)
       });
-      setEnvironments([...environments, response.data]);
+      
+      setCurrentEnvironment(response.data);
+      
+      // Poll for status updates
+      const pollInterval = setInterval(async () => {
+        try {
+          await fetchEnvironments();
+          const updatedEnvs = await axios.get(`${API_BASE}/environments`);
+          if (updatedEnvs.data.length > 0 && updatedEnvs.data[0].status === 'running') {
+            clearInterval(pollInterval);
+          }
+        } catch (error) {
+          console.error('Error polling environments:', error);
+          clearInterval(pollInterval);
+        }
+      }, 2000);
+      
     } catch (error) {
       console.error('Error creating environment:', error);
+      alert(error.response?.data?.error || 'Failed to create environment');
     } finally {
-      setLoading(false);
+      setIsCreating(false);
     }
   };
 
   const deleteEnvironment = async (envId) => {
     try {
       await axios.delete(`${API_BASE}/environments/${envId}`);
-      setEnvironments(environments.filter(env => env.id !== envId));
-      if (selectedEnv?.id === envId) {
-        setSelectedEnv(null);
-      }
+      setCurrentEnvironment(null);
+      setSelectedEnvironment(null);
+      await fetchEnvironments();
     } catch (error) {
       console.error('Error deleting environment:', error);
+      alert('Failed to delete environment');
     }
   };
 
   const connectToEnvironment = (env) => {
-    if (env.status === 'running') {
-      setSelectedEnv(env);
-    }
+    setSelectedEnvironment(env);
   };
+
+  const hasEnvironment = currentEnvironment !== null;
+  const canCreateEnvironment = !hasEnvironment && !isCreating;
 
   return (
     <div className="App">
       <header className="App-header">
-        <h1>FinalBoss Kind - Ephemeral K8s Environments</h1>
+        <h1>FinalBoss Kind - Ephemeral K8s Environment</h1>
       </header>
       
       <div className="main-content">
@@ -76,58 +109,84 @@ function App() {
                 max="10"
                 value={nodeCount}
                 onChange={(e) => setNodeCount(e.target.value)}
-                disabled={loading}
+                disabled={!canCreateEnvironment}
                 className="node-input"
               />
             </div>
-            <button 
-              onClick={createEnvironment} 
-              disabled={loading}
+            
+            <button
+              onClick={createEnvironment}
+              disabled={!canCreateEnvironment}
               className="create-btn"
             >
-              {loading ? 'Creating...' : `Create ${nodeCount}-Node Environment`}
+              {isCreating 
+                ? 'Creating...' 
+                : hasEnvironment 
+                ? 'Delete existing environment first'
+                : `Create ${nodeCount}-Node Environment`
+              }
             </button>
+
+            {hasEnvironment && (
+              <div className="environment-info">
+                <p className="current-env-notice">
+                  Only one environment can exist at a time.
+                </p>
+              </div>
+            )}
           </div>
-          
+
           <div className="environments">
-            <h3>Environments</h3>
-            {environments.length === 0 ? (
-              <p>No environments</p>
+            <h3>Current Environment</h3>
+            {!currentEnvironment ? (
+              <p>No environment exists</p>
             ) : (
-              environments.map(env => (
-                <div key={env.id} className={`env-item ${env.status}`}>
-                  <div className="env-info">
-                    <span className="env-name">{env.name}</span>
-                    <span className="env-nodes">{env.nodeCount} node{env.nodeCount > 1 ? 's' : ''}</span>
-                    <span className={`env-status ${env.status}`}>{env.status}</span>
-                  </div>
-                  <div className="env-actions">
-                    <button 
-                      onClick={() => connectToEnvironment(env)}
-                      disabled={env.status !== 'running'}
-                      className="connect-btn"
-                    >
-                      Connect
-                    </button>
-                    <button 
-                      onClick={() => deleteEnvironment(env.id)}
-                      className="delete-btn"
-                    >
-                      Delete
-                    </button>
-                  </div>
+              <div className={`env-item ${currentEnvironment.status}`}>
+                <div className="env-info">
+                  <span className="env-name">{currentEnvironment.name}</span>
+                  <span className="env-nodes">
+                    {currentEnvironment.nodeCount} node{currentEnvironment.nodeCount > 1 ? 's' : ''}
+                  </span>
+                  <span className={`env-status ${currentEnvironment.status}`}>
+                    {currentEnvironment.status}
+                  </span>
                 </div>
-              ))
+                <div className="env-actions">
+                  <button
+                    onClick={() => connectToEnvironment(currentEnvironment)}
+                    disabled={currentEnvironment.status !== 'running'}
+                    className="connect-btn"
+                  >
+                    Connect
+                  </button>
+                  <button
+                    onClick={() => deleteEnvironment(currentEnvironment.id)}
+                    className="delete-btn"
+                  >
+                    Delete
+                  </button>
+                </div>
+              </div>
             )}
           </div>
         </div>
-        
+
         <div className="terminal-area">
-          {selectedEnv ? (
-            <Terminal environmentId={selectedEnv.id} environmentName={selectedEnv.name} />
+          {selectedEnvironment ? (
+            <Terminal 
+              environmentId={selectedEnvironment.id}
+              environmentName={selectedEnvironment.name}
+            />
           ) : (
             <div className="no-terminal">
-              <p>Select a running environment to connect to terminal</p>
+              <p>
+                {currentEnvironment 
+                  ? currentEnvironment.status === 'running'
+                    ? 'Click "Connect" to access the terminal'
+                    : 'Waiting for environment to be ready...'
+                  : 'Create an environment to get started'
+                }
+              </p>
             </div>
           )}
         </div>

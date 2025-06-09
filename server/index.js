@@ -4,15 +4,13 @@ const socketIo = require('socket.io');
 const pty = require('node-pty');
 const { spawn } = require('child_process');
 const cors = require('cors');
-const { v4: uuidv4 } = require('uuid');
-const fs = require('fs');
 const path = require('path');
 
 const app = express();
 const server = http.createServer(app);
 const io = socketIo(server, {
   cors: {
-    origin: "http://localhost:3000",
+    origin: "*",
     methods: ["GET", "POST"]
   }
 });
@@ -20,34 +18,43 @@ const io = socketIo(server, {
 app.use(cors());
 app.use(express.json());
 
-// Store active environments
-const activeEnvironments = new Map();
-const activeSessions = new Map();
+// Serve static files from the React app build directory
+app.use(express.static(path.join(__dirname, '../client/build')));
 
-// API Routes
+// Store current environment (only one allowed)
+let currentEnvironment = null;
+
+// Get all environments
 app.get('/api/environments', (req, res) => {
-  const envs = Array.from(activeEnvironments.keys()).map(id => ({
-    id,
-    name: activeEnvironments.get(id).name,
-    status: activeEnvironments.get(id).status,
-    nodeCount: activeEnvironments.get(id).nodeCount || 1
-  }));
-  res.json(envs);
+  const environments = currentEnvironment ? [currentEnvironment] : [];
+  res.json(environments);
 });
 
+// Create new environment
 app.post('/api/environments', async (req, res) => {
-  const envId = uuidv4();
-  const envName = `kind-${envId.substring(0, 8)}`;
-  const { nodeCount = 1 } = req.body;
+  const { nodeCount } = req.body;
   
-  try {
-    activeEnvironments.set(envId, {
-      name: envName,
-      status: 'creating',
-      containerId: null,
-      nodeCount
+  // Check if environment already exists
+  if (currentEnvironment) {
+    return res.status(400).json({ 
+      error: 'An environment already exists. Please delete it before creating a new one.' 
     });
+  }
 
+  const envId = `env-${Date.now()}`;
+  const envName = `kind-cluster-${nodeCount}node`;
+  
+  currentEnvironment = {
+    id: envId,
+    name: envName,
+    nodeCount: parseInt(nodeCount),
+    status: 'creating',
+    createdAt: new Date().toISOString()
+  };
+
+  res.json(currentEnvironment);
+
+  try {
     // Generate Kind configuration for multi-node cluster
     const kindConfig = generateKindConfig(nodeCount);
     const configPath = path.join(__dirname, `kind-config-${envId}.yaml`);
@@ -80,50 +87,57 @@ app.post('/api/environments', async (req, res) => {
         });
 
         dockerPs.on('close', () => {
-          activeEnvironments.set(envId, {
+          currentEnvironment = {
+            id: envId,
             name: envName,
             status: 'running',
             containerId: containerId,
             nodeCount
-          });
+          };
         });
       } else {
-        activeEnvironments.set(envId, {
+        currentEnvironment = {
+          id: envId,
           name: envName,
           status: 'error',
           containerId: null,
           nodeCount
-        });
+        };
       }
     });
-
-    res.json({ id: envId, name: envName, status: 'creating', nodeCount });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
+// Delete environment
 app.delete('/api/environments/:id', async (req, res) => {
-  const envId = req.params.id;
-  const env = activeEnvironments.get(envId);
-
-  if (!env) {
+  const { id } = req.params;
+  
+  if (!currentEnvironment || currentEnvironment.id !== id) {
     return res.status(404).json({ error: 'Environment not found' });
   }
 
   try {
-    // Delete Kind cluster
-    const kindProcess = spawn('kind', ['delete', 'cluster', '--name', env.name], {
-      stdio: 'pipe'
+    // Delete the kind cluster
+    const deleteProcess = spawn('kind', ['delete', 'cluster', '--name', currentEnvironment.name]);
+    
+    deleteProcess.on('close', (code) => {
+      if (code === 0) {
+        currentEnvironment = null; // Clear the current environment
+        res.json({ message: 'Environment deleted successfully' });
+      } else {
+        res.status(500).json({ error: 'Failed to delete environment' });
+      }
     });
 
-    kindProcess.on('close', (code) => {
-      activeEnvironments.delete(envId);
+    deleteProcess.on('error', (err) => {
+      console.error('Delete process error:', err);
+      res.status(500).json({ error: 'Failed to delete environment' });
     });
-
-    res.json({ message: 'Environment deletion started' });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error('Error deleting environment:', error);
+    res.status(500).json({ error: 'Failed to delete environment' });
   }
 });
 
@@ -159,7 +173,7 @@ io.on('connection', (socket) => {
 
   socket.on('start-terminal', (data) => {
     const { environmentId } = data;
-    const env = activeEnvironments.get(environmentId);
+    const env = currentEnvironment;
 
     if (!env || !env.containerId) {
       socket.emit('terminal-error', 'Environment not ready');
