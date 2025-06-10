@@ -34,6 +34,69 @@
   margin-bottom: 20px;
 }
 
+.form-group {
+  margin-bottom: 15px;
+}
+
+.form-group label {
+  display: block;
+  margin-bottom: 5px;
+  font-weight: bold;
+  color: #333;
+}
+
+.form-input,
+.form-select {
+  width: 100%;
+  padding: 8px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 14px;
+}
+
+.form-input:focus,
+.form-select:focus {
+  outline: none;
+  border-color: #007bff;
+}
+
+.form-input:disabled,
+.form-select:disabled {
+  background-color: #f8f9fa;
+  cursor: not-allowed;
+}
+
+.checkbox-group {
+  border: 1px solid #e9ecef;
+  border-radius: 4px;
+  padding: 12px;
+  background-color: #f8f9fa;
+}
+
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  margin-bottom: 5px;
+}
+
+.checkbox-input {
+  margin-right: 8px;
+  width: auto;
+}
+
+.checkbox-text {
+  font-weight: 500;
+  color: #495057;
+}
+
+.checkbox-description {
+  font-size: 12px;
+  color: #6c757d;
+  margin-left: 24px;
+  line-height: 1.4;
+}
+
 .node-count-input {
   margin-bottom: 15px;
 }
@@ -136,11 +199,20 @@
   margin-bottom: 3px;
 }
 
-.env-nodes {
+.env-nodes,
+.env-k8s-version {
   font-size: 12px;
   color: #666;
-  display: block;
-  margin-bottom: 5px;
+}
+
+.env-istio {
+  font-size: 11px;
+  background-color: #e3f2fd;
+  color: #1976d2;
+  padding: 1px 6px;
+  border-radius: 3px;
+  display: inline-block;
+  width: fit-content;
 }
 
 .env-status {
@@ -256,4 +328,11 @@
   text-align: center;
   padding: 20px;
   line-height: 1.5;
+}
+
+.env-details {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 5px;
 }
